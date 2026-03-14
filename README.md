@@ -4,7 +4,7 @@
 
 ## Демо
 
-[Демку](https://alexstep.github.io/sensor/) лучше смотреть с мобилки.
+[Демку](https://alexstep.github.io/sensor/) лучше смотреть с мобилки, а ещё лучше открыть [миниапп в телеграм](https://t.me/calendar0bot/ui_example)
 
 
 ## Быстрый старт
