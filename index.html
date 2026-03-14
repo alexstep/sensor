@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Блестящие эффекты</title>
+  <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a href="https://github.com/alexstep/sensor" class="github-link" target="_blank" rel="noopener noreferrer" aria-label="GitHub">GitHub</a>
+  <form action="javascript:void(0);" onsubmit="return false;">
+    <fieldset>
+      <label for="motion" title="Отслеживание наклона устройства">CSS блики</label>
+      <input type="checkbox" id="css_shines" class="toggle" checked>
+    </fieldset>
+    <fieldset>
+      <label for="sensors" title="Отслеживание наклона устройства">Отслеживание сенсоров</label>
+      <input type="checkbox" id="sensors" class="toggle" checked>
+    </fieldset>
+    <fieldset>
+      <label for="animate">JS-интерполяция</label>
+      <input type="checkbox" id="animate" class="toggle">
+    </fieldset>
+    <fieldset>
+      <label for="useSpring">Пружинная физика</label>
+      <input type="checkbox" id="useSpring" class="toggle" checked>
+    </fieldset>
+    <fieldset class="theme-picker">
+      <div class="theme-swatches">
+        <label class="theme-swatch" title="Синяя">
+          <input type="radio" name="theme" value="">
+        </label>
+        <label class="theme-swatch" title="iOS Light">
+          <input type="radio" name="theme" value="ios">
+        </label>
+        <label class="theme-swatch" title="Тёмная">
+          <input type="radio" name="theme" value="dark">
+        </label>
+        <label class="theme-swatch" title="Молочная">
+          <input type="radio" name="theme" value="cream">
+        </label>
+        <label class="theme-swatch" title="Лавандовая">
+          <input type="radio" name="theme" value="lavender">
+        </label>
+        <label class="theme-swatch" title="Изумрудная">
+          <input type="radio" name="theme" value="emerald">
+        </label>
+      </div>
+    </fieldset>
+    <button type="button">Рандомная тема</button>
+  </form>
+
+  <link rel="stylesheet" href="effects.css">
+  <script type="module">
+    import GyroShine from "./sensors.js";
+
+    document.body.setAttribute('мага', 'сияй');
+
+    // Инициализация GyroShine с JS-анимацией (spring physics)
+    const gyro = new GyroShine({
+      debug: true,
+      minBattery: 0, // минимальный процент заряда батареи (0 - не проверять батарею)
+      refreshRate: 42,    // частота опроса датчиков
+      animate: false,     // включить JS-интерполяцию
+      lerpSpeed: 0.05,    // скорость линейной интерполяции
+      useSpring: true,    // пружинная физика (false = lerp)
+      stiffness: 0.02,    // жёсткость пружины
+      damping: 0.95       // затухание
+    });
+
+    // Слушаем события и обновляем CSS переменные
+    gyro.on('change', (e) => {
+      document.documentElement.style.setProperty('--gyro-gamma-percent', e.detail.gammaPercent);
+      document.documentElement.style.setProperty('--gyro-beta-percent', e.detail.betaPercent);
+    });
+
+
+
+
+    const cssShinesToggle = document.getElementById('css_shines');
+    const sensorsToggle = document.getElementById('sensors');
+    const animateToggle = document.getElementById('animate');
+    const useSpringToggle = document.getElementById('useSpring');
+    function updateDependentToggles() {
+      const motionEnabled = sensorsToggle.checked;
+      animateToggle.disabled = !motionEnabled;
+      useSpringToggle.disabled = !motionEnabled || !animateToggle.checked;
+    }
+
+    // В мобильном safari не включаем motion , потому что ещё разрешение надо запрашивать
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!isIOS || window.Telegram?.WebApp?.platform === 'ios') sensorsToggle.checked = true;
+
+    cssShinesToggle.addEventListener('change', () => {
+      if (cssShinesToggle.checked) {
+        document.body.setAttribute('мага', 'сияй');
+      } else {
+        document.body.removeAttribute('мага');
+      }
+    });
+    sensorsToggle.addEventListener('change', () => {
+      if (sensorsToggle.checked) {
+        gyro.animate = animateToggle.checked;
+        gyro.config.useSpring = useSpringToggle.checked;
+        gyro.start();
+      } else {
+        gyro.stop();
+      }
+    });
+    animateToggle.addEventListener('change', () => {
+      gyro.animate = animateToggle.checked;
+      updateDependentToggles();
+    });
+    useSpringToggle.addEventListener('change', () => {
+      gyro.config.useSpring = useSpringToggle.checked;
+    });
+    updateDependentToggles();
+
+    if (sensorsToggle.checked) {
+      gyro.start();
+    }
+
+    document.addEventListener('change', (e) => {
+      if (e.target.tagName === 'INPUT' && (e.target.type === 'checkbox' || e.target.type === 'radio')) {
+        navigator.vibrate(1);
+      }
+    }, true);
+
+    const themes = [
+      { name: '', label: 'Синяя' },
+      { name: 'ios', label: 'iOS Light' },
+      { name: 'dark', label: 'Тёмная' },
+      { name: 'cream', label: 'Молочная' },
+      { name: 'lavender', label: 'Лавандовая' },
+      { name: 'emerald', label: 'Изумрудная' },
+    ];
+    const themeRadios = document.querySelectorAll('input[name="theme"]');
+    const themeBtn = document.querySelector('form > button');
+
+    function applyTheme(name) {
+      if (name) {
+        document.documentElement.dataset.theme = name;
+      } else {
+        delete document.documentElement.dataset.theme;
+      }
+    }
+
+    function syncRadios() {
+      const current = document.documentElement.dataset.theme || '';
+      themeRadios.forEach((r) => { r.checked = r.value === current; });
+    }
+
+    themeRadios.forEach((r) => {
+      r.addEventListener('change', () => applyTheme(r.value));
+    });
+    syncRadios();
+
+    themeBtn.addEventListener('click', () => {
+      const current = document.documentElement.dataset.theme || '';
+      let next;
+      do {
+        next = themes[Math.floor(Math.random() * themes.length)];
+      } while (next.name === current);
+      applyTheme(next.name);
+      syncRadios();
+      navigator.vibrate(1);
+    });
+  </script>
+</body>
+</html>

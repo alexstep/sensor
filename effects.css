@@ -1,0 +1,358 @@
+/**
+ * Gyro Shine Effects
+ * CSS переменные обновляются из JS на основе данных с датчиков устройства
+ */
+:root {
+  --gyro-gamma-percent: 50;
+  --gyro-beta-percent: 50;
+}
+
+/* =============================================
+   Static fallback (reduced-motion safe)
+   ============================================= */
+[мага="сияй"] {
+  & form {
+    box-shadow:
+      0 15px 20px rgba(0, 0, 0, 0.05),
+      0 5px 100px rgba(0, 0, 0, 0.05) inset;
+  }
+
+  & button {
+    border-top: 1px solid rgba(255, 255, 255, 0.3);
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+    border-right: 1px solid rgba(255, 255, 255, 0.16);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.32);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+  }
+}
+
+/* =============================================
+   Dynamic effects (motion allowed)
+   ============================================= */
+@media (prefers-reduced-motion: no-preference) {
+  [мага="сияй"] {
+    --g-offset: calc(var(--gyro-gamma-percent) - 50);
+    --b-offset: calc(var(--gyro-beta-percent) - 50);
+
+    /* --- tuning: параллакс фона --- */
+    --bg-speed-x: -1px;
+    --bg-speed-y: -0.5px;
+
+    background-position:
+      calc(var(--gyro-gamma-percent) * var(--bg-speed-x)) calc(var(--gyro-beta-percent) * var(--bg-speed-y)),
+      calc(var(--gyro-gamma-percent) * var(--bg-speed-x)) calc(var(--gyro-beta-percent) * var(--bg-speed-y)),
+      0 0;
+
+    /* --- Form --- */
+    & form {
+      /* --- tuning: тень формы --- */
+      --form-shadow-speed: -0.5px;         /* интенсивность смещения основной тени */
+      --form-shadow-base-y: 15px;          /* начальный вертикальный отступ */
+      --form-shadow-blur: 25px;
+      --form-shadow-color: rgba(0, 0, 0, 0.5);
+
+      will-change: box-shadow;
+      backdrop-filter: blur(0.5px);
+      box-shadow:
+        calc(var(--g-offset) * -0.15px) calc(1px + var(--b-offset) * -0.1px) 0px var(--form-glow-color),
+        calc(var(--g-offset) * var(--form-shadow-speed))
+        calc(var(--form-shadow-base-y) + var(--b-offset) * var(--form-shadow-speed))
+        var(--form-shadow-blur) var(--form-shadow-color),
+        -5px 5px 50px rgba(0, 0, 0, 0.2) inset;
+    }
+
+    & form::before {
+      /* --- tuning: световое пятно на форме --- */
+      --spot-speed-x: -1%;                /* скорость по горизонтали */
+      --spot-speed-y: -0.6%;              /* скорость по вертикали */
+      --spot-base-y: 15%;                 /* начальная позиция центра */
+      --spot-color: rgba(255, 255, 255, 0.15);
+      --spot-color-mid: rgba(255, 255, 255, 0.05);
+
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      border-radius: inherit;
+      will-change: background;
+      background: radial-gradient(
+        ellipse 120% 100% at
+          calc(50% + var(--g-offset) * var(--spot-speed-x))
+          calc(var(--spot-base-y) + var(--b-offset) * var(--spot-speed-y)),
+        var(--spot-color) 0%,
+        var(--spot-color-mid) 40%,
+        transparent 70%
+      );
+      pointer-events: none;
+    }
+
+    & form::after {
+      /* --- tuning: линия-блик на правом краю --- */
+      --edge-speed: -2.5%;               /* скорость скольжения */
+      --edge-opacity: 0.8;
+      --edge-color: #fff3;               /* пиковая яркость */
+
+      content: "";
+      position: absolute;
+      right: 0;
+      top: 20%;
+      width: 1px;
+      height: 60%;
+      will-change: transform;
+      transform: translateY(calc(var(--b-offset) * var(--edge-speed)));
+      background: linear-gradient(to top, #0000 10%, #fff1 40%, var(--edge-color) 55%, #fff1 70%, #0000 90%);
+      opacity: var(--edge-opacity);
+      pointer-events: none;
+    }
+
+    /* --- Fieldsets --- */
+    & fieldset label {
+      color: var(--text-secondary);
+    }
+
+    & fieldset:first-of-type::after {
+      /* --- tuning: блик на верхнем разделителе --- */
+      --sep-top-speed: -4%;              /* скорость смещения */
+      --sep-top-color: #fff5;            /* пиковая яркость */
+
+      content: "";
+      position: absolute;
+      top: -8px;
+      left: 40%;
+      width: 50%;
+      height: 1px;
+      will-change: transform;
+      transform: translateX(calc(var(--g-offset) * var(--sep-top-speed)));
+      background: linear-gradient(90deg, #0000 5%, #fff1 25%, var(--sep-top-color) 45%, var(--sep-top-color) 55%, #fff1 75%, #0000 95%);
+      pointer-events: none;
+    }
+
+    & fieldset:not(:last-of-type)::before {
+      /* --- tuning: блик на нижнем разделителе --- */
+      --sep-bot-speed: -6%;              /* скорость смещения */
+      --sep-bot-color: #fff4;            /* пиковая яркость */
+
+      content: "";
+      position: absolute;
+      bottom: -1px;
+      right: 40%;
+      width: 50%;
+      height: 1px;
+      will-change: transform;
+      transform: translateX(calc(var(--g-offset) * var(--sep-bot-speed)));
+      background: linear-gradient(90deg, #0000 10%, var(--sep-bot-color) 50%, #0000 90%);
+      pointer-events: none;
+    }
+
+    & fieldset:first-of-type::before {
+      right: 30%;
+    }
+
+    /* --- Checkbox --- */
+    & input[type="checkbox"].toggle {
+      /* --- tuning: блик в тоггле --- */
+      --toggle-speed: -3px;              /* скорость смещения */
+      --toggle-shine-color: #fff8;       /* яркость полосы */
+      --toggle-opacity-off: 0.27;        /* непрозрачность (выкл) */
+      --toggle-opacity-on: 1;            /* непрозрачность (вкл) */
+
+      &::after {
+        content: "";
+        position: absolute;
+        z-index: 0;
+        top: 0;
+        left: 10px;
+        width: 100px;
+        height: 28px;
+        will-change: transform;
+        transform: translateX(calc(var(--g-offset) * var(--toggle-speed)));
+        background: linear-gradient(90deg, #0000 20%, var(--toggle-shine-color) 38%, #0000 62%);
+        opacity: var(--toggle-opacity-off);
+        pointer-events: none;
+      }
+
+      &:checked::after {
+        opacity: var(--toggle-opacity-on);
+      }
+    }
+
+    /* --- Button --- */
+    & button {
+      /* --- tuning: тень кнопки --- */
+      --btn-shadow-speed: -0.1px;        /* интенсивность смещения тени */
+      --btn-shadow-color: rgba(0, 0, 0, 0.7);
+
+      /* --- tuning: блики кнопки --- */
+      --btn-shine-speed: -4%;            /* скорость диагонального блика */
+      --btn-shine-peak: #fff7;           /* пиковая яркость диагонали */
+      --btn-edge-speed-x: -2.2%;         /* скорость блика по верхнему краю */
+      --btn-edge-speed-y: 2.55%;         /* скорость блика по правому краю */
+      --btn-edge-peak: #fffb;            /* пиковая яркость края */
+
+      will-change: box-shadow;
+      border-top: 1px solid rgba(255, 255, 255, 0.3);
+      border-left: 1px solid rgba(255, 255, 255, 0.12);
+      border-right: 1px solid rgba(255, 255, 255, 0.16);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.32);
+      box-shadow:
+        calc(var(--g-offset) * -0.07px) calc(var(--b-offset) * -0.07px) 0px var(--button-shadow-color),
+        calc(2px + var(--g-offset) * var(--btn-shadow-speed))
+        calc(var(--b-offset) * var(--btn-shadow-speed))
+        5px var(--btn-shadow-color);
+    }
+
+    & form > button:last-child::before {
+      /* --- tuning: блик по нижнему краю кнопки --- */
+      --btn-bottom-speed: -2%;           /* скорость смещения */
+      --btn-bottom-base: 60%;            /* начальная позиция */
+      --btn-bottom-color: #fff8;         /* пиковая яркость */
+
+      content: "";
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      transform: translateX(calc(var(--btn-bottom-base) - var(--gyro-gamma-percent) * 2%));
+      will-change: transform;
+      width: 50%;
+      height: 1px;
+      background: linear-gradient(90deg, #0000 5%, #fff1 15%, var(--btn-bottom-color) 55%, #fff1 85%, #0000 95%);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    & button::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      will-change: background;
+      background:
+        /* диагональный блик */
+        linear-gradient(
+          102deg,
+          #fff1 calc(-5% + var(--g-offset) * var(--btn-shine-speed)),
+          #fff2 calc(18% + var(--g-offset) * var(--btn-shine-speed)),
+          #fff4 calc(40% + var(--g-offset) * var(--btn-shine-speed)),
+          var(--btn-shine-peak) calc(56% + var(--g-offset) * var(--btn-shine-speed)),
+          #fff4 calc(72% + var(--g-offset) * var(--btn-shine-speed)),
+          #fff2 calc(88% + var(--g-offset) * var(--btn-shine-speed)),
+          #fff1 calc(105% + var(--g-offset) * var(--btn-shine-speed))
+        ),
+        /* блик по верхнему краю (1px) */
+        linear-gradient(
+          to right,
+          #0000 calc(6% + var(--g-offset) * -2.85%),
+          #fff1 calc(28% + var(--g-offset) * -2.05%),
+          #fff7 calc(48% + var(--g-offset) * var(--btn-edge-speed-x)),
+          var(--btn-edge-peak) calc(56% + var(--g-offset) * var(--btn-edge-speed-x)),
+          #fff2 calc(74% + var(--g-offset) * -2.05%),
+          #0000 calc(96% + var(--g-offset) * -2.85%)
+        ) 0 0 / 100% 1px no-repeat,
+        /* блик по правому краю (1px) */
+        linear-gradient(
+          to bottom,
+          #0000 calc(6% + var(--b-offset) * 2.1%),
+          #fff1 calc(30% + var(--b-offset) * 2.35%),
+          #fff7 calc(50% + var(--b-offset) * var(--btn-edge-speed-y)),
+          #fff2 calc(70% + var(--b-offset) * 2.35%),
+          #0000 calc(96% + var(--b-offset) * 2.1%)
+        ) 100% 0 / 1px 100% no-repeat;
+    }
+  }
+}
+
+
+/* =============================================
+   Themes
+   ============================================= */
+
+/* --- iOS Light --- */
+html[data-theme="ios"] {
+  --fg-color: #ffffffee;
+  --bg-color: #f2f2f7;
+  --text-color: #1c1c1e;
+  --text-secondary: rgba(28, 28, 30, 0.55);
+  --checkbox-bg-color: #e9e9eb;
+  --checkbox-bg-color-checked: #34c759;
+  --checkbox-border-color: rgba(0, 0, 0, 0.08);
+  --button-bg: #007affcc;
+  --button-shadow-color: #007aff44;
+  --form-glow-color: #c7c7cc44;
+  --separator-color: rgba(0, 0, 0, 0.08);
+  --grid-color: rgba(0, 0, 0, 0.03);
+  --glow-color: rgba(0, 122, 255, 0.05);
+  color-scheme: light;
+}
+
+/* --- Dark (серо-чёрная) --- */
+html[data-theme="dark"] {
+  --fg-color: #1c1c1edd;
+  --bg-color: #000000;
+  --text-color: #f5f5f5;
+  --text-secondary: rgba(235, 235, 245, 0.6);
+  --checkbox-bg-color: #39393d;
+  --checkbox-bg-color-checked: #30d158;
+  --checkbox-border-color: rgba(0, 0, 0, 0.6);
+  --button-bg: #48484acc;
+  --button-shadow-color: #00000055;
+  --form-glow-color: #2c2c2e55;
+  --separator-color: rgba(255, 255, 255, 0.05);
+  --grid-color: rgba(255, 255, 255, 0.03);
+  --glow-color: rgba(255, 255, 255, 0.02);
+  color-scheme: dark;
+}
+
+/* --- Cream (молочная) --- */
+html[data-theme="cream"] {
+  --fg-color: #fff8f0ee;
+  --bg-color: #f5efe6;
+  --text-color: #3d3229;
+  --text-secondary: rgba(61, 50, 41, 0.6);
+  --checkbox-bg-color: #e0d5c7;
+  --checkbox-bg-color-checked: #c4956a;
+  --checkbox-border-color: rgba(0, 0, 0, 0.08);
+  --button-bg: #8b6f4ecc;
+  --button-shadow-color: #8b6f4e44;
+  --form-glow-color: #d4c4b044;
+  --separator-color: rgba(0, 0, 0, 0.06);
+  --grid-color: rgba(139, 111, 78, 0.06);
+  --glow-color: rgba(196, 149, 106, 0.08);
+  color-scheme: light;
+}
+
+/* --- Lavender (лавандовая) --- */
+html[data-theme="lavender"] {
+  --fg-color: #f5f0ffee;
+  --bg-color: #ece5f5;
+  --text-color: #2d2640;
+  --text-secondary: rgba(45, 38, 64, 0.6);
+  --checkbox-bg-color: #d8d0e8;
+  --checkbox-bg-color-checked: #8b5cf6;
+  --checkbox-border-color: rgba(0, 0, 0, 0.08);
+  --button-bg: #7c3aedcc;
+  --button-shadow-color: #7c3aed44;
+  --form-glow-color: #c4b5e044;
+  --separator-color: rgba(0, 0, 0, 0.06);
+  --grid-color: rgba(139, 92, 246, 0.05);
+  --glow-color: rgba(139, 92, 246, 0.08);
+  color-scheme: light;
+}
+
+/* --- Emerald (изумрудная) --- */
+html[data-theme="emerald"] {
+  --fg-color: #0d3320dd;
+  --bg-color: #021a0f;
+  --text-color: #e0f5ea;
+  --text-secondary: rgba(224, 245, 234, 0.6);
+  --checkbox-bg-color: #1a4030;
+  --checkbox-bg-color-checked: #10b981;
+  --checkbox-border-color: rgba(0, 0, 0, 0.5);
+  --button-bg: #059669cc;
+  --button-shadow-color: #05966944;
+  --form-glow-color: #14503555;
+  --separator-color: rgba(255, 255, 255, 0.06);
+  --grid-color: rgba(16, 185, 129, 0.08);
+  --glow-color: rgba(16, 185, 129, 0.1);
+  color-scheme: dark;
+}

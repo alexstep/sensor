@@ -1,0 +1,270 @@
+:root {
+  --fg-color: #242468dd;
+  --bg-color: #020617;
+  --text-color: #fff;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --checkbox-bg-color: #121440;
+  --checkbox-bg-color-checked: #45c447;
+  --checkbox-border-color: rgba(0, 0, 0, 0.5);
+  --button-bg: #1438b977;
+  --button-shadow-color: #1438b955;
+  --form-glow-color: #24246855;
+  --separator-color: rgba(255, 255, 255, 0.07);
+  --grid-color: rgba(71, 85, 105, 0.3);
+  --glow-color: rgba(139, 92, 246, 0.15);
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  /* Убираем синюю подсветку при тапе на iOS/Android */
+  -webkit-tap-highlight-color: transparent;
+  /* Отключаем системное контекстное меню на iOS */
+  -webkit-touch-callout: none;
+  /* Запрещаем выделение текста (кроме полей ввода) */
+  user-select: none;
+}
+textarea,
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"] {
+  user-select: text;
+}
+
+*,
+*::after,
+*::before {
+  -webkit-user-drag: none;
+  -webkit-app-region: no-drag;
+}
+input:-webkit-autofill,
+input:-webkit-autofill:focus {
+  transition:
+    background-color 600000s 0s,
+    color 600000s 0s;
+}
+input[data-autocompleted] {
+  background-color: transparent !important;
+}
+img {
+  text-indent: -10000px;
+  background: transparent;
+  position: relative;
+  overflow: hidden;
+}
+img[alt]:after {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: transparent;
+  text-align: center;
+  content: " ";
+}
+
+
+body {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--text-color);
+  padding: 20px;
+
+  background: var(--bg-color);
+  background-image: linear-gradient(to right, var(--grid-color) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px), radial-gradient(circle at 50% 50%, var(--glow-color) 0%, transparent 70%);
+  background-size: 32px 32px, 32px 32px, 100% 100%;
+}
+
+
+.github-link {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 100;
+  color: var(--text-color);
+  text-decoration: none;
+  font-size: 0.9rem;
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+/* Form card */
+form {
+  position: relative;
+  background: var(--fg-color);
+  border-top: 1px solid var(--fg-color);
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  border-left: 1px solid rgba(0, 0, 0, 0.05);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 15px 20px rgba(0, 0, 0, 0.05),
+    0 5px 100px rgba(0, 0, 0, 0.05) inset;
+  padding: 8px 8px 8px 8px;
+  border-radius: 18px;
+  corner-shape: superellipse(1);
+  overflow: hidden;
+  width: min(400px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Fieldset */
+fieldset {
+  position: relative;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px 14px 20px;
+  margin: 0 -8px;
+  border-bottom: 1px solid var(--separator-color);
+
+  &:last-of-type {
+    border-bottom: none;
+    margin-bottom: 12px;
+  }
+
+  & label {
+    font-size: 16px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+}
+
+
+/* Checkbox toggle */
+input[type="checkbox"].toggle {
+  appearance: none;
+  cursor: pointer;
+  display: inline-block;
+  background: var(--checkbox-bg-color);
+  border-radius: 16px;
+  width: 50px;
+  height: 28px;
+  position: relative;
+  vertical-align: middle;
+  transition: background 0.25s;
+  border-top: 1px solid var(--checkbox-border-color);
+  overflow: hidden;
+
+  &::before {
+    content: "";
+    display: block;
+    background: #fefefe;
+    filter: saturate(2);
+    box-shadow: 0 2px 0 rgba(0, 0, 0, 0.08);
+    border-radius: 50%;
+    height: calc(100% - 4px);
+    aspect-ratio: 1;
+    position: absolute;
+    top: 1.5px;
+    left: 3px;
+    transition: transform 0.25s;
+    z-index: 1;
+  }
+
+  &:checked {
+    background: var(--checkbox-bg-color-checked);
+
+    &::before {
+      transform: translateX(calc(100% - 2px));
+    }
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+/* Button */
+button {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  background: var(--button-bg);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 16px;
+  font-weight: 600;
+  padding: 14px 20px;
+  border-radius: 12px;
+  corner-shape: superellipse(1);
+  transition: transform 0.1s linear;
+
+  &:active {
+    transform: scale(0.991);
+  }
+}
+
+/* Theme picker */
+fieldset.theme-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 10px;
+}
+
+.theme-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.theme-swatch {
+  display: block;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+
+.theme-swatch input[type="radio"] {
+  appearance: none;
+  display: block;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.1s;
+}
+
+.theme-swatch input[type="radio"]:checked {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, 0.35);
+}
+
+.theme-swatch input[type="radio"]:active {
+  transform: scale(0.95);
+}
+
+.theme-swatch input[type="radio"][value=""] { background: #242468; }
+.theme-swatch input[type="radio"][value="ios"] { background: #007aff; }
+.theme-swatch input[type="radio"][value="dark"] { background: #1c1c1e; }
+.theme-swatch input[type="radio"][value="cream"] { background: #c4956a; }
+.theme-swatch input[type="radio"][value="lavender"] { background: #8b5cf6; }
+.theme-swatch input[type="radio"][value="emerald"] { background: #10b981; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  input[type="checkbox"].toggle::before {
+    transition: none;
+  }
+}
