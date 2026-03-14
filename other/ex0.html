@@ -1,0 +1,35 @@
+<section id="test">Кликни тут для запроса разрешения в Safari</section>
+
+<script defer>
+  // пока что совсем базово
+  window.addEventListener('deviceorientation', e => {
+    document.documentElement.style.setProperty('--gyro-gamma', e.gamma);
+    document.documentElement.style.setProperty('--gyro-beta', e.beta);
+  })
+  document.querySelector('#test').addEventListener('click', async ()=>{
+    if (typeof DeviceOrientationEvent?.requestPermission !== 'function') return 
+    const result = await DeviceOrientationEvent.requestPermission();
+    console.log(result)
+  })
+</script>
+
+<style>
+  :root { 
+    --gyro-gamma: 50; --gyro-beta: 50; 
+  }
+  section { 
+    position:relative;
+    margin: 40px auto;
+    width: 70%; height: 50%;
+    background: #333; color: #fff; cursor: pointer;
+    &::before {
+      content: "";
+      position: absolute;
+      border-radius: 100%;
+      top: 50%; left: 50%;
+      width: 10px; height: 10px;
+      background: yellow;
+      transform: translate(calc(var(--gyro-gamma) * 1px), calc(var(--gyro-beta) * 1px));
+    }
+  }
+</style>
