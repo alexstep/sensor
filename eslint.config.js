@@ -1,0 +1,36 @@
+export default [
+  {
+    files: ['sensors.js', 'scripts/**/*.js', 'test/**/*.js', 'e2e/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly',
+        navigator: 'readonly',
+        document: 'readonly',
+        performance: 'readonly',
+        DeviceOrientationEvent: 'readonly',
+        RelativeOrientationSensor: 'readonly',
+        CustomEvent: 'readonly',
+        Event: 'readonly',
+        EventTarget: 'readonly',
+        console: 'readonly',
+        requestAnimationFrame: 'readonly',
+        cancelAnimationFrame: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        matchMedia: 'readonly',
+        process: 'readonly',
+        queueMicrotask: 'readonly',
+        URL: 'readonly',
+        getComputedStyle: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none' }],
+      'no-undef': 'error',
+    },
+  },
+]
