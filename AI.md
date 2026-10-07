@@ -44,7 +44,7 @@ gyro.on('change', (e) => {
 gyro.start();
 ```
 
-На iOS Safari `start()` должен вызываться из обработчика пользовательского действия (клик), иначе запрос разрешения на доступ к сенсорам не сработает.
+На iOS Safari `start()` должен вызываться из обработчика пользовательского действия (клик), иначе запрос разрешения на доступ к сенсорам не сработает. Датчики движения доступны только в secure context (HTTPS или localhost); иначе остаётся fallback на указатель.
 
 ### React
 
@@ -479,7 +479,8 @@ input[type="checkbox"].toggle:checked::after {
 |----------|-----|-------------|----------|
 | `refreshRate` | number | 42 | Частота опроса датчиков (мс) |
 | `animate` | boolean | false | JS-интерполяция (spring/lerp) |
-| `useSpring` | boolean | false | Пружинная физика (false = lerp) |
+| `useSpring` | boolean | true | Пружинная физика (false = lerp) |
+| `respectReducedMotion` | boolean | true | Не слушать датчики при `prefers-reduced-motion: reduce` |
 | `stiffness` | number | 0.12 | Жёсткость пружины (0.01–0.3) |
 | `damping` | number | 0.82 | Затухание пружины (0.5–0.95) |
 | `lerpSpeed` | number | 0.09 | Скорость lerp (если useSpring=false) |

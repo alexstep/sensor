@@ -1,0 +1,5 @@
+{
+  "name": "sensor",
+  "install": "bash .cursor/install.sh",
+  "start": "exec node scripts/demo-server.js"
+}

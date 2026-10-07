@@ -11,7 +11,7 @@
   <a href="https://github.com/alexstep/sensor" class="github-link" target="_blank" rel="noopener noreferrer" aria-label="GitHub">GitHub</a>
   <form action="javascript:void(0);" onsubmit="return false;">
     <fieldset>
-      <label for="motion" title="Отслеживание наклона устройства">CSS блики</label>
+      <label for="css_shines" title="Отслеживание наклона устройства">CSS блики</label>
       <input type="checkbox" id="css_shines" class="toggle" checked>
     </fieldset>
     <fieldset>
@@ -88,9 +88,14 @@
       useSpringToggle.disabled = !motionEnabled || !animateToggle.checked;
     }
 
-    // В мобильном safari не включаем motion , потому что ещё разрешение надо запрашивать
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    if (!isIOS || window.Telegram?.WebApp?.platform === 'ios') sensorsToggle.checked = true;
+    // iOS и мобильный Chromium: requestPermission() только из user gesture.
+    // На десктопе (pointer: fine) чекбокс остаётся включённым — сразу работает мышь.
+    // В Telegram iOS разрешение запрашивает хост, автостарт оставляем.
+    const needsGesture = typeof DeviceOrientationEvent !== 'undefined'
+      && typeof DeviceOrientationEvent.requestPermission === 'function';
+    const primaryCoarse = window.matchMedia('(pointer: coarse)').matches;
+    const telegramIOS = window.Telegram?.WebApp?.platform === 'ios';
+    if (needsGesture && primaryCoarse && !telegramIOS) sensorsToggle.checked = false;
 
     cssShinesToggle.addEventListener('change', () => {
       if (cssShinesToggle.checked) {

@@ -1,0 +1,21 @@
+{
+  "name": "sensor",
+  "private": true,
+  "version": "0.0.0",
+  "description": "CSS shine effects driven by device orientation. Not published to npm.",
+  "type": "module",
+  "scripts": {
+    "demo": "node scripts/demo-server.js",
+    "lint": "eslint sensors.js scripts test e2e",
+    "test": "node --test test/tilt.test.js",
+    "test:e2e": "playwright test",
+    "test:all": "npm test && npm run test:e2e"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "eslint": "^10.12.0"
+  }
+}

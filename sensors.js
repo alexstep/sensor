@@ -6,7 +6,7 @@
  * 1. Telegram Mini Apps API — внутри приложения Telegram на iOS/Android
  * 2. RelativeOrientationSensor — Sensor API (Chrome, Android)
  * 3. deviceorientation — fallback для Safari и остальных браузеров
- * 4. mousemove — fallback для десктопов (включён по умолчанию)
+ * 4. pointermove — fallback для десктопа (мышь и перо, без touch; включён по умолчанию)
  *
  * Все источники (кроме мыши) используют blend-подход для горизонтали:
  * при наклонённом телефоне — отслеживаем наклон (gravity/gamma),
@@ -24,8 +24,17 @@
  *     stiffness: 0.12,
  *     damping: 0.82
  *   });
- *   gyro.on('change', ({ gammaPercent, betaPercent }) => { ... });
+ *   gyro.on('change', (e) => {
+ *     e.detail.gammaPercent
+ *     e.detail.betaPercent
+ *   });
  *   gyro.start();
+ *
+ * iOS 13+: DeviceOrientationEvent.requestPermission() вызывается синхронно
+ * из start(), поэтому start() нужно звать из обработчика клика/тапа.
+ * Датчики движения работают только в secure context (HTTPS или localhost).
+ * При prefers-reduced-motion: reduce слушатели не вешаются.
+ * Если датчиков нет — fallback на pointermove (мышь и перо, не touch).
  */
 const DEFAULT_REFRESH_RATE   = 42;
 const SENSOR_FREQUENCY       = 60
@@ -49,6 +58,72 @@ const BETA_RANGE  = 45
 // При типичном удержании (~45°) uprightness ≈ 0.71 — blend = 0, чистый gravity.
 const UPRIGHT_START = 0.85
 const UPRIGHT_RANGE = 0.13
+const SENSOR_START_TIMEOUT = 1500
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+
+export function clamp(value, min = -1, max = 1) {
+  return Math.min(max, Math.max(min, value))
+}
+
+/** 0–100 percent → CSS string with two decimals ("50.00"). */
+export function formatPercent(percent) {
+  return (Math.round(percent * 100) / 100).toFixed(2)
+}
+
+/** Normalized tilt -1..1 → CSS percent. 0 is the neutral "50.00". */
+export function normToPercent(norm) {
+  return formatPercent((norm + 1) * 50)
+}
+
+export function normsToCssVars(gammaNorm, betaNorm) {
+  return {
+    gammaPercent: normToPercent(gammaNorm),
+    betaPercent: normToPercent(betaNorm),
+  }
+}
+
+/**
+ * Blend gravity-gamma with yaw when the phone is nearly upright.
+ * @returns {{ blend: number, azimuthGamma: number, newBase: number }}
+ */
+export function computeYawBlend(uprightness, angleDeg, baseDeg) {
+  const blend = clamp((uprightness - UPRIGHT_START) / UPRIGHT_RANGE, 0, 1)
+
+  let newBase = baseDeg ?? angleDeg
+  let azimuthGamma = 0
+
+  if (blend < 0.01) {
+    newBase = angleDeg
+  } else {
+    let delta = angleDeg - newBase
+    if (delta > 180) delta -= 360
+    if (delta < -180) delta += 360
+    azimuthGamma = clamp(delta / GAMMA_RANGE)
+  }
+
+  return { blend, azimuthGamma, newBase }
+}
+
+/**
+ * deviceorientation Euler angles → normalized gamma/beta.
+ * Returns null when the sample must be ignored.
+ * @param {{ alpha?: number|null, beta?: number|null, gamma?: number|null }} angles
+ * @param {number|null} alphaBase
+ * @returns {{ gammaNorm: number, betaNorm: number, alphaBase: number } | null}
+ */
+export function deviceOrientationToNorm(angles, alphaBase) {
+  const { alpha, beta, gamma } = angles
+  if (gamma == null || beta == null) return null
+  if (beta > 90) return null
+
+  const betaNorm = clamp((beta - BETA_OFFSET) / BETA_RANGE)
+  const gravityGamma = clamp(gamma / GAMMA_RANGE)
+  const uprightness = Math.sin(beta * DEG2RAD)
+  const yaw = computeYawBlend(uprightness, alpha ?? 0, alphaBase)
+  const gammaNorm = gravityGamma * (1 - yaw.blend) + yaw.azimuthGamma * yaw.blend
+
+  return { gammaNorm, betaNorm, alphaBase: yaw.newBase }
+}
 
 export default class GyroShine extends EventTarget {
   // === STATE ===
@@ -79,7 +154,12 @@ export default class GyroShine extends EventTarget {
   #twaOrientation = null
   #batteryCheckInterval = null
   #deviceOrientationHandler = null
-  #mouseMoveHandler = null
+  #pointerHandler = null
+  #onSensorReading = null
+  #generation = 0
+  #active = false
+  #motionMedia = null
+  #onMotionMediaChange = null
 
   /**
    * @param {Object} options
@@ -91,7 +171,8 @@ export default class GyroShine extends EventTarget {
    * @param {number} [options.lerpSpeed=0.09] — скорость линейной интерполяции (0.01–0.2)
    * @param {number} [options.minBattery=0.4] — минимальный уровень батареи (0 = выкл)
    * @param {boolean} [options.debug=false] — вывод логов в консоль
-   * @param {boolean} [options.useMouse=true] — использовать мышь как fallback на десктопе
+   * @param {boolean} [options.useMouse=true] — fallback на указатель (мышь/перо) на десктопе
+   * @param {boolean} [options.respectReducedMotion=true] — не слушать датчики при prefers-reduced-motion
    */
   constructor(options = {}) {
     super()
@@ -106,6 +187,7 @@ export default class GyroShine extends EventTarget {
       debug       : options.debug ?? false,
       minBattery  : options.minBattery ?? 0.4,
       useMouse    : options.useMouse ?? true,
+      respectReducedMotion: options.respectReducedMotion ?? true,
     };
   }
 
@@ -134,7 +216,7 @@ export default class GyroShine extends EventTarget {
   // =============================================================
 
   #clamp(value, min = -1, max = 1) {
-    return Math.min(max, Math.max(min, value))
+    return clamp(value, min, max)
   }
 
   #throttle(fn, delay) {
@@ -162,28 +244,7 @@ export default class GyroShine extends EventTarget {
    * @returns {{ blend: number, azimuthGamma: number, newBase: number }}
    */
   #computeYawBlend(uprightness, angleDeg, baseDeg) {
-    // blend: 0 (телефон наклонён, используем gravity)
-    //        1 (телефон вертикален, используем azimuth)
-    const blend = this.#clamp((uprightness - UPRIGHT_START) / UPRIGHT_RANGE, 0, 1)
-
-    let newBase = baseDeg ?? angleDeg
-    let azimuthGamma = 0
-
-    if (blend < 0.01) {
-      // Пока blend ≈ 0, непрерывно обновляем базу.
-      // Когда телефон перейдёт в вертикальное положение,
-      // база "заморозится" на последнем значении — и дельта
-      // начнёт расти от нуля, обеспечивая плавный старт.
-      newBase = angleDeg
-    } else {
-      let delta = angleDeg - newBase
-      // Обработка перехода через ±180° (wraparound)
-      if (delta > 180) delta -= 360
-      if (delta < -180) delta += 360
-      azimuthGamma = this.#clamp(delta / GAMMA_RANGE)
-    }
-
-    return { blend, azimuthGamma, newBase }
+    return computeYawBlend(uprightness, angleDeg, baseDeg)
   }
 
   #log(...args) {
@@ -272,8 +333,8 @@ export default class GyroShine extends EventTarget {
     this.#prevGP = gp
     this.#prevBP = bp
 
-    this.#detail.gammaPercent = (gp / 100).toFixed(2)
-    this.#detail.betaPercent  = (bp / 100).toFixed(2)
+    this.#detail.gammaPercent = formatPercent(gammaPercent)
+    this.#detail.betaPercent  = formatPercent(betaPercent)
 
     this.dispatchEvent(new CustomEvent('change', { detail: this.#detail }))
   }
@@ -288,42 +349,111 @@ export default class GyroShine extends EventTarget {
    * blend: при наклонённом телефоне — gamma, при вертикальном — delta alpha.
    */
   #handleDeviceOrientation = e => {
-    if (e.gamma == null || e.beta == null) return
-    if (e.beta > 90) return
-
-    // --- Beta (вертикаль) ---
-    // beta 0° = лежит, 45° = в руке (нейтраль), 90° = стоит вертикально.
-    // Нормализуем так, чтобы BETA_OFFSET (45°) было серединой (0).
-    const betaNorm = this.#clamp((e.beta - BETA_OFFSET) / BETA_RANGE)
-
-    // --- Gamma (горизонталь) с blend ---
-
-    // 1. Gravity-подход: gamma реагирует на физический наклон лево/право.
-    //    Хорошо работает при наклонённом телефоне, но "замирает" при beta ≈ 90°
-    //    потому что наклон и yaw становятся неразличимы (gimbal lock).
-    const gravityGamma = this.#clamp(e.gamma / GAMMA_RANGE)
-
-    // 2. Yaw-подход: дельта alpha реагирует на поворот вокруг вертикальной оси.
-    //    Не зависит от beta, но нужна начальная точка отсчёта.
-    const uprightness = Math.sin(e.beta * DEG2RAD)
-    const { blend, azimuthGamma, newBase } = this.#computeYawBlend(uprightness, e.alpha ?? 0, this.#alphaBase)
-    this.#alphaBase = newBase
-
-    // 3. Итоговый gamma: интерполяция между двумя подходами.
-    //    blend = 0 → чистый gravity, blend = 1 → чистый azimuth.
-    const gammaNorm = gravityGamma * (1 - blend) + azimuthGamma * blend
-
-    this.#setTarget(gammaNorm, betaNorm)
+    const tilt = deviceOrientationToNorm(
+      { alpha: e.alpha, beta: e.beta, gamma: e.gamma },
+      this.#alphaBase,
+    )
+    if (!tilt) return
+    this.#alphaBase = tilt.alphaBase
+    this.#setTarget(tilt.gammaNorm, tilt.betaNorm)
   }
 
   /**
-   * Обработчик мыши (десктоп-фоллбэк).
-   * Позиция курсора → gammaNorm/betaNorm (-1..1) с ослаблением 0.2.
+   * Указатель на десктопе (мышь и перо). Touch не учитываем:
+   * иначе скролл на телефоне перебивает гироскоп.
+   * Позиция → gammaNorm/betaNorm (-1..1) с ослаблением 0.2.
    */
-  #handleMouseMove = e => {
-    const gammaNorm = (e.clientX / window.innerWidth)  * 2 - 1;
-    const betaNorm  = (e.clientY / window.innerHeight) * 2 - 1
+  #handlePointerMove = e => {
+    if (e.pointerType === 'touch') return
+    const width = window.innerWidth
+    const height = window.innerHeight
+    if (!width || !height) return
+    const gammaNorm = (e.clientX / width) * 2 - 1
+    const betaNorm = (e.clientY / height) * 2 - 1
     this.#setTarget(-0.2 * gammaNorm, -0.2 * betaNorm)
+  }
+
+  #emitNeutral() {
+    this.#targetGamma = 0
+    this.#targetBeta = 0
+    this.#currentGamma = 0
+    this.#currentBeta = 0
+    this.#velocityGamma = 0
+    this.#velocityBeta = 0
+    this.#prevGP = -1
+    this.#prevBP = -1
+    this.#emitValues(50, 50)
+  }
+
+  #motionBlocked() {
+    return this.config.respectReducedMotion !== false && this.#prefersReducedMotion()
+  }
+
+  #prefersReducedMotion() {
+    if (typeof matchMedia !== 'function') return false
+    try {
+      return matchMedia(REDUCED_MOTION_QUERY).matches
+    } catch {
+      return false
+    }
+  }
+
+  #isSecureContext() {
+    if (typeof window === 'undefined') return true
+    if (typeof window.isSecureContext === 'boolean') return window.isSecureContext
+    return true
+  }
+
+  #watchMotionPreference() {
+    if (this.config.respectReducedMotion === false) return
+    if (typeof matchMedia !== 'function') return
+    if (this.#motionMedia) return
+
+    this.#motionMedia = matchMedia(REDUCED_MOTION_QUERY)
+    this.#onMotionMediaChange = (event) => {
+      if (!this.#active) return
+      if (event.matches) {
+        this.#detachSources()
+        this.#emitNeutral()
+        return
+      }
+      void this.start()
+    }
+    this.#motionMedia.addEventListener('change', this.#onMotionMediaChange)
+  }
+
+  #unwatchMotionPreference() {
+    if (this.#motionMedia && this.#onMotionMediaChange) {
+      this.#motionMedia.removeEventListener('change', this.#onMotionMediaChange)
+    }
+    this.#motionMedia = null
+    this.#onMotionMediaChange = null
+  }
+
+  #armRuntime() {
+    this.#startBatteryCheck()
+    this.#startAnimationLoop()
+    this.#watchMotionPreference()
+  }
+
+  async #readBatteryLevel() {
+    if (this.config.minBattery <= 0) return null
+    if (typeof navigator === 'undefined' || typeof navigator.getBattery !== 'function') return null
+    try {
+      const battery = await navigator.getBattery()
+      if (!battery || typeof battery.level !== 'number') return null
+      return battery.level
+    } catch {
+      return null
+    }
+  }
+
+  #batteryTooLow(level) {
+    if (level == null || level >= this.config.minBattery) return false
+    this.#warn(`Battery low (${(level * 100).toFixed(0)}%), stopping sensors`)
+    this.stop()
+    this.dispatchEvent(new CustomEvent('lowbattery', { detail: { level } }))
+    return true
   }
 
   // =============================================================
@@ -388,30 +518,45 @@ export default class GyroShine extends EventTarget {
    * экрана (portrait/landscape), не нужно компенсировать вручную.
    */
   async #initOrientationSensor() {
-    if (!window.RelativeOrientationSensor) return false
+    const SensorCtor = window.RelativeOrientationSensor
+    if (typeof SensorCtor !== 'function') return false
 
+    let sensor
     try {
-      this.#sensor = new RelativeOrientationSensor({
+      sensor = new SensorCtor({
         frequency: SENSOR_FREQUENCY,
         referenceFrame: 'screen',
       })
+      this.#sensor = sensor
 
-      this.#sensor.addEventListener('reading', () => {
-        const tilt = this.#quaternionToTilt(this.#sensor)
+      this.#onSensorReading = () => {
+        if (this.#sensor !== sensor) return
+        const tilt = this.#quaternionToTilt(sensor)
         this.#setTarget(tilt.gammaNorm, tilt.betaNorm)
-      })
+      }
+      sensor.addEventListener('reading', this.#onSensorReading)
 
       const ok = await new Promise(resolve => {
-        this.#sensor.addEventListener('reading', () => resolve(true), { once: true })
-        this.#sensor.addEventListener('error', e => {
-          this.#error('OrientationSensor error:', e.error.message)
-          resolve(false)
+        let settled = false
+        const finish = (value) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve(value)
+        }
+        const timer = setTimeout(() => finish(false), SENSOR_START_TIMEOUT)
+        sensor.addEventListener('reading', () => finish(true), { once: true })
+        sensor.addEventListener('error', (event) => {
+          const message = event?.error?.message ?? 'unknown'
+          this.#error('OrientationSensor error:', message)
+          finish(false)
         }, { once: true })
-        this.#sensor.start()
+        sensor.start()
       })
 
-      if (!ok) {
-        this.#sensor = null
+      if (!ok || this.#sensor !== sensor) {
+        this.#releaseSensor(sensor)
+        if (this.#sensor === sensor) this.#sensor = null
         return false
       }
 
@@ -419,8 +564,19 @@ export default class GyroShine extends EventTarget {
       return true
     } catch (err) {
       this.#warn('RelativeOrientationSensor init failed:', err.message)
-      this.#sensor = null
+      if (sensor) this.#releaseSensor(sensor)
+      if (this.#sensor === sensor) this.#sensor = null
       return false
+    }
+  }
+
+  #releaseSensor(sensor) {
+    if (!sensor) return
+    if (this.#onSensorReading) sensor.removeEventListener('reading', this.#onSensorReading)
+    try {
+      sensor.stop()
+    } catch {
+      // Sensor may already be stopped or failed before start().
     }
   }
 
@@ -501,39 +657,64 @@ export default class GyroShine extends EventTarget {
     this.#log('Using deviceorientation')
   }
 
-  #initMouse() {
+  #initPointer() {
     if (!this.config.useMouse) return
 
-    if (!this.#mouseMoveHandler) {
-      this.#mouseMoveHandler = this.#throttle(this.#handleMouseMove, this.config.refreshRate)
+    if (!this.#pointerHandler) {
+      this.#pointerHandler = this.#throttle(this.#handlePointerMove, this.config.refreshRate)
     }
 
-    window.addEventListener('mousemove', this.#mouseMoveHandler, {
-      passive: true,
-    })
-
-    this.#log('Using mouse fallback')
+    window.addEventListener('pointermove', this.#pointerHandler, { passive: true })
+    this.#log('Using pointer fallback')
   }
 
-  async #requestIOSPermission() {
+  /**
+   * Вызывает requestPermission() синхронно, до любых await в start().
+   * На iOS 13+ разрешение выдаётся только из user gesture и только по HTTPS.
+   * @returns {Promise<'unavailable'|'insecure'|'skipped'|'granted'|'denied'>}
+   */
+  #kickIOSPermission() {
     if (typeof DeviceOrientationEvent === 'undefined' || typeof DeviceOrientationEvent.requestPermission !== 'function') {
-      return true
+      return Promise.resolve('unavailable')
     }
 
+    if (!this.#isSecureContext()) return Promise.resolve('insecure')
+
+    const activation = typeof navigator !== 'undefined' ? navigator.userActivation : undefined
+    if (activation && activation.isActive === false) {
+      this.#warn('iOS motion permission needs a user gesture')
+      this.dispatchEvent(new CustomEvent('permissionneeded'))
+      return Promise.resolve('skipped')
+    }
+
+    this.#log('Requesting iOS permission...')
     try {
-      this.#log('Requesting iOS permission...')
-      const result = await DeviceOrientationEvent.requestPermission()
-
-      if (result === 'granted') {
-        this.#log('iOS permission granted')
-        return true
-      }
-
-      this.#warn('iOS permission denied')
-      return false
+      return DeviceOrientationEvent.requestPermission()
+        .then((result) => {
+          if (result === 'granted') {
+            this.#log('iOS permission granted')
+            return 'granted'
+          }
+          // Chromium может вернуть "prompt", если диалог не закрыт выбором.
+          // Это не отказ: остаётся fallback и событие permissionneeded.
+          if (result === 'prompt') {
+            this.#warn('Motion permission still prompt')
+            this.dispatchEvent(new CustomEvent('permissionneeded', { detail: { result } }))
+            return 'skipped'
+          }
+          this.#warn('iOS permission denied')
+          this.dispatchEvent(new CustomEvent('permissionneeded', { detail: { result } }))
+          return 'denied'
+        })
+        .catch((err) => {
+          this.#error('iOS permission error:', err?.message)
+          this.dispatchEvent(new CustomEvent('permissionneeded', { detail: { error: err?.message } }))
+          return 'denied'
+        })
     } catch (err) {
-      this.#error('iOS permission error:', err.message)
-      return false
+      this.#error('iOS permission error:', err?.message)
+      this.dispatchEvent(new CustomEvent('permissionneeded', { detail: { error: err?.message } }))
+      return Promise.resolve('denied')
     }
   }
 
@@ -542,28 +723,17 @@ export default class GyroShine extends EventTarget {
   // =============================================================
 
   async #checkBattery() {
-    if (this.config.minBattery <= 0) return true
-
-    const battery = await navigator.getBattery?.()
-    if (!battery) return true
-
-    if (battery.level < this.config.minBattery) {
-      this.#warn(`Battery low (${(battery.level * 100).toFixed(0)}%), stopping sensors`)
-      this.stop()
-      this.dispatchEvent(
-        new CustomEvent('lowbattery', {
-          detail: { level: battery.level },
-        }),
-      )
-      return false
-    }
-
+    const level = await this.#readBatteryLevel()
+    if (this.#batteryTooLow(level)) return false
     return true
   }
 
   #startBatteryCheck() {
     if (this.config.minBattery <= 0) return
-    this.#batteryCheckInterval = setInterval(() => this.#checkBattery(), BATTERY_CHECK_INTERVAL)
+    this.#stopBatteryCheck()
+    this.#batteryCheckInterval = setInterval(() => {
+      void this.#checkBattery()
+    }, BATTERY_CHECK_INTERVAL)
   }
 
   #stopBatteryCheck() {
@@ -580,40 +750,96 @@ export default class GyroShine extends EventTarget {
   /**
    * Запускает отслеживание ориентации.
    * Автоматически выбирает лучший доступный источник данных.
+   * На iOS вызывайте из обработчика клика: requestPermission() требует user gesture.
    */
   async start() {
-    const batteryOk = await this.#checkBattery()
-    if (!batteryOk) return
+    const gen = ++this.#generation
+    this.#detachSources()
+    this.#unwatchMotionPreference()
+    this.#active = true
 
-    this.#startBatteryCheck()
-    this.#startAnimationLoop()
+    if (this.#motionBlocked()) {
+      this.#emitNeutral()
+      this.#watchMotionPreference()
+      return
+    }
 
-    if (this.#initTelegramAPI()) return
+    // Уровень батареи читаем параллельно, но не await-им до запроса разрешения:
+    // await до requestPermission() сбрасывает user gesture на iOS.
+    const levelPromise = this.#readBatteryLevel()
 
-    const hasPermission = await this.#requestIOSPermission()
-    if (!hasPermission) return
+    if (this.#initTelegramAPI()) {
+      const level = await levelPromise
+      if (gen !== this.#generation || !this.#active) return
+      if (this.#batteryTooLow(level)) return
+      this.#armRuntime()
+      return
+    }
 
-    if (await this.#initOrientationSensor()) return
+    const permissionPromise = this.#kickIOSPermission()
+    const level = await levelPromise
+    if (gen !== this.#generation || !this.#active) return
+    if (this.#batteryTooLow(level)) return
+
+    this.#armRuntime()
+
+    if (!this.#isSecureContext()) {
+      console.warn('[GyroShine] Motion sensors need a secure context (HTTPS or localhost). Using pointer fallback.')
+      await permissionPromise
+      if (gen !== this.#generation || !this.#active) return
+      this.#initPointer()
+      return
+    }
+
+    const permission = await permissionPromise
+    if (gen !== this.#generation || !this.#active) return
+
+    if (permission === 'denied' || permission === 'skipped' || permission === 'insecure') {
+      this.#initPointer()
+      return
+    }
+
+    if (await this.#initOrientationSensor()) {
+      if (gen !== this.#generation || !this.#active) {
+        this.#detachSources()
+        return
+      }
+      return
+    }
+    if (gen !== this.#generation || !this.#active) return
 
     this.#initDeviceOrientation()
-    this.#initMouse()
+    this.#initPointer()
   }
 
-  /** Останавливает отслеживание ориентации и освобождает ресурсы. */
+  /** Останавливает отслеживание ориентации и снимает все слушатели. */
   stop() {
+    this.#generation++
+    this.#active = false
+    this.#detachSources()
+    this.#unwatchMotionPreference()
+    this.#log('Stopped')
+  }
+
+  #detachSources() {
     this.#stopBatteryCheck()
     this.#stopAnimationLoop()
 
     if (this.#twaOrientation) {
-      this.#twaOrientation.stop()
+      try {
+        this.#twaOrientation.stop()
+      } catch {
+        // Telegram может уже остановить датчик.
+      }
       window.Telegram?.WebApp?.offEvent('deviceOrientationChanged', this.#twaHandler)
       this.#twaHandler = null
       this.#twaOrientation = null
     }
 
     if (this.#sensor) {
-      this.#sensor.stop()
+      this.#releaseSensor(this.#sensor)
       this.#sensor = null
+      this.#onSensorReading = null
     }
 
     if (this.#deviceOrientationHandler) {
@@ -621,16 +847,13 @@ export default class GyroShine extends EventTarget {
       this.#deviceOrientationHandler = null
     }
 
-    if (this.#mouseMoveHandler) {
-      window.removeEventListener('mousemove', this.#mouseMoveHandler)
-      this.#mouseMoveHandler = null
+    if (this.#pointerHandler) {
+      window.removeEventListener('pointermove', this.#pointerHandler)
+      this.#pointerHandler = null
     }
 
-    // Сброс yaw-баз для корректного рестарта
     this.#alphaBase = null
     this.#azimuthBase = null
-
-    this.#log('Stopped')
   }
 
   /** @param {string} eventName @param {Function} callback */

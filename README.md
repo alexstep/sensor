@@ -8,6 +8,8 @@
 
 [Демку](https://alexstep.github.io/sensor/) лучше смотреть с мобилки, а ещё лучше открыть [миниапп в телеграм](https://t.me/calendar0bot/ui_example)
 
+Локально: `npm ci`, затем `npm run demo` — страница на http://127.0.0.1:4173 . Проверки: `npm test`, `npm run test:e2e`, `npm run lint`. Пакет в npm не публикуется.
+
 
 ## Быстрый старт
 
@@ -17,16 +19,18 @@
 Инструкция: https://raw.githubusercontent.com/alexstep/sensor/main/AI.md
 ```
 
-или ручками:
+или ручками (`sensors.js` — ES-модуль, не классический script):
 ```html
-<script src="sensors.js"></script>
-<script>
+<script type="module">
+  import GyroShine from './sensors.js'
+
   const gyro = new GyroShine()
-  gyro.start()
   gyro.on('change', e => {
     document.documentElement.style.setProperty('--gyro-gamma-percent', e.detail.gammaPercent)
     document.documentElement.style.setProperty('--gyro-beta-percent', e.detail.betaPercent)
   })
+  // На iOS start() нужно вызвать из клика/тапа. Датчики работают только по HTTPS.
+  gyro.start()
 </script>
 ```
 
@@ -40,7 +44,7 @@
 | 2 | GravitySensor / Accelerometer | Chrome, Android |
 | 3 | deviceorientation | Safari, Firefox и др. |
 
-На iOS Safari автоматически запрашивается разрешение пользователя.
+На iOS 13+ Safari `start()` вызывает `DeviceOrientationEvent.requestPermission()`. Это нужно делать из обработчика клика или тапа и только в secure context (HTTPS или localhost). Если разрешения нет, библиотека переходит на указатель (мышь/перо). При `prefers-reduced-motion: reduce` датчики не включаются.
 
 ## API
 
@@ -54,7 +58,9 @@ const gyro = new GyroShine({
   stiffness: 0.12,        // жёсткость пружины (0.01–0.3)
   damping: 0.82,          // затухание пружины (0.5–0.95)
   lerpSpeed: 0.09,        // скорость lerp (если useSpring = false)
-  minBatteryLevel: 0.4,   // мин. заряд батареи (0 = не проверять)
+  minBattery: 0.4,        // мин. заряд батареи (0 = не проверять)
+  useMouse: true,         // fallback на мышь/перо, если датчиков нет
+  respectReducedMotion: true, // не двигать блики при prefers-reduced-motion
   debug: false,           // вывод логов в консоль
 })
 ```
@@ -88,6 +94,8 @@ gyro.on('change', e => {
 ```
 
 Нейтральное положение устройства - `50.00` / `50.00`.
+
+**`permissionneeded`** — iOS не выдал разрешение (нет user gesture, отказ или ошибка). Можно показать кнопку и снова вызвать `start()` из её обработчика.
 
 **`lowbattery`** - вызывается при низком заряде (датчики автоматически останавливаются):
 
