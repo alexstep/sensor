@@ -2,9 +2,10 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <!-- Telegram Mini App: без зума, иначе pinch в вебвью ломает вёрстку. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Блестящие эффекты</title>
-  <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js?59" integrity="sha384-PyI6uk8O3pfRRl4+CaepaS++FqtEbco/HaV3jzdYl4y+U7HMQvn3gWVfKhjuzfzG" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -59,7 +60,7 @@
 
     // Инициализация GyroShine с JS-анимацией (spring physics)
     const gyro = new GyroShine({
-      debug: true,
+      debug: false,
       minBattery: 0, // минимальный процент заряда батареи (0 - не проверять батарею)
       refreshRate: 42,    // частота опроса датчиков
       animate: false,     // включить JS-интерполяцию
@@ -88,14 +89,13 @@
       useSpringToggle.disabled = !motionEnabled || !animateToggle.checked;
     }
 
-    // iOS и мобильный Chromium: requestPermission() только из user gesture.
-    // На десктопе (pointer: fine) чекбокс остаётся включённым — сразу работает мышь.
-    // В Telegram iOS разрешение запрашивает хост, автостарт оставляем.
+    // iOS 13+ и iPadOS: requestPermission есть и при pointer: fine.
+    // Жест нужен всегда, когда метод есть. В Telegram iOS разрешение берёт хост.
     const needsGesture = typeof DeviceOrientationEvent !== 'undefined'
       && typeof DeviceOrientationEvent.requestPermission === 'function';
-    const primaryCoarse = window.matchMedia('(pointer: coarse)').matches;
-    const telegramIOS = window.Telegram?.WebApp?.platform === 'ios';
-    if (needsGesture && primaryCoarse && !telegramIOS) sensorsToggle.checked = false;
+    const telegramGrantsMotion = window.Telegram?.WebApp?.platform === 'ios'
+      && window.Telegram.WebApp.DeviceOrientation;
+    if (needsGesture && !telegramGrantsMotion) sensorsToggle.checked = false;
 
     cssShinesToggle.addEventListener('change', () => {
       if (cssShinesToggle.checked) {
@@ -126,9 +126,13 @@
       gyro.start();
     }
 
+    function vibrateTick() {
+      if (typeof navigator.vibrate === 'function') navigator.vibrate(1);
+    }
+
     document.addEventListener('change', (e) => {
       if (e.target.tagName === 'INPUT' && (e.target.type === 'checkbox' || e.target.type === 'radio')) {
-        navigator.vibrate(1);
+        vibrateTick();
       }
     }, true);
 
@@ -169,7 +173,7 @@
       } while (next.name === current);
       applyTheme(next.name);
       syncRadios();
-      navigator.vibrate(1);
+      vibrateTick();
     });
   </script>
 </body>

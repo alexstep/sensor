@@ -18,6 +18,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm audit
       - run: npm run lint
       - run: npm test
       - run: npx playwright install --with-deps chromium
@@ -26,6 +27,9 @@ jobs:
   pages:
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: pages
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     permissions:
       contents: read

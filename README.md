@@ -41,10 +41,10 @@
 | Приоритет | Источник | Где работает |
 |-----------|----------|--------------|
 | 1 | Telegram Mini Apps API | Telegram iOS/Android |
-| 2 | GravitySensor / Accelerometer | Chrome, Android |
+| 2 | RelativeOrientationSensor | Chrome, Android |
 | 3 | deviceorientation | Safari, Firefox и др. |
 
-На iOS 13+ Safari `start()` вызывает `DeviceOrientationEvent.requestPermission()`. Это нужно делать из обработчика клика или тапа и только в secure context (HTTPS или localhost). Если разрешения нет, библиотека переходит на указатель (мышь/перо). При `prefers-reduced-motion: reduce` датчики не включаются.
+На iOS 13+ Safari (и iPadOS) `start()` вызывает `DeviceOrientationEvent.requestPermission()`. Это нужно делать из обработчика клика или тапа и только в secure context (HTTPS или localhost). Если разрешения нет, библиотека переходит на указатель (мышь/перо) и снимает его после первой валидной выборки ориентации. При `prefers-reduced-motion: reduce` датчики не включаются. Когда ограничение снимается и браузер требует разрешение, приходит `permissionneeded` с `detail.reason === "gesture"`: следующий клик вызывает `requestPermission()`.
 
 ## API
 
