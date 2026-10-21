@@ -33,8 +33,11 @@
  * iOS 13+: DeviceOrientationEvent.requestPermission() вызывается синхронно
  * из start(), поэтому start() нужно звать из обработчика клика/тапа.
  * Датчики движения работают только в secure context (HTTPS или localhost).
- * При prefers-reduced-motion: reduce слушатели не вешаются.
- * Если датчиков нет — fallback на pointermove (мышь и перо, не touch).
+ * При prefers-reduced-motion: reduce слушатели не вешаются. Когда ограничение
+ * снимается и браузер требует requestPermission(), шлётся permissionneeded
+ * и разрешение запрашивается со следующего клика, а не с указателя.
+ * Указатель (мышь и перо, не touch) работает, пока не пришла валидная
+ * выборка ориентации — после неё pointermove снимается.
  */
 const DEFAULT_REFRESH_RATE   = 42;
 const SENSOR_FREQUENCY       = 60
@@ -73,6 +76,10 @@ export function formatPercent(percent) {
 /** Normalized tilt -1..1 → CSS percent. 0 is the neutral "50.00". */
 export function normToPercent(norm) {
   return formatPercent((norm + 1) * 50)
+}
+
+function clampPercent(percent) {
+  return Math.min(100, Math.max(0, percent))
 }
 
 export function normsToCssVars(gammaNorm, betaNorm) {
@@ -144,7 +151,6 @@ export default class GyroShine extends EventTarget {
   #azimuthBase = null // для RelativeOrientationSensor (градусы)
 
   // Переиспользуемые объекты (избегаем аллокаций на горячем пути)
-  #detail = { gammaPercent: '50.00', betaPercent: '50.00' }
   #tiltResult = { gammaNorm: 0, betaNorm: 0 }
 
   // === RESOURCES ===
@@ -160,6 +166,8 @@ export default class GyroShine extends EventTarget {
   #active = false
   #motionMedia = null
   #onMotionMediaChange = null
+  #permissionGestureHandler = null
+  #lastFrame = null
 
   /**
    * @param {Object} options
@@ -221,12 +229,36 @@ export default class GyroShine extends EventTarget {
 
   #throttle(fn, delay) {
     let last = 0
-    return (...args) => {
+    let timer = null
+    let pending = null
+    const wrapped = (...args) => {
       const now = performance.now()
-      if (now - last < delay) return
-      last = now
-      fn(...args)
+      if (!(delay > 0) || now - last >= delay) {
+        if (timer) {
+          clearTimeout(timer)
+          timer = null
+          pending = null
+        }
+        last = now
+        fn(...args)
+        return
+      }
+      pending = args
+      if (timer) return
+      timer = setTimeout(() => {
+        timer = null
+        last = performance.now()
+        const saved = pending
+        pending = null
+        if (saved) fn(...saved)
+      }, delay - (now - last))
     }
+    wrapped.cancel = () => {
+      if (timer) clearTimeout(timer)
+      timer = null
+      pending = null
+    }
+    return wrapped
   }
 
   /**
@@ -263,19 +295,30 @@ export default class GyroShine extends EventTarget {
   // АНИМАЦИЯ (SPRING / LERP)
   // =============================================================
 
-  #animationLoop = () => {
+  #animationLoop = (now) => {
+    const frame = typeof now === 'number' ? now : performance.now()
+    if (this.#lastFrame == null) {
+      this.#lastFrame = frame
+      this.#animationFrame = requestAnimationFrame(this.#animationLoop)
+      return
+    }
+    // dt = 1 соответствует кадру 60 Гц, под который подобраны stiffness/damping.
+    const dt = Math.min(Math.max((frame - this.#lastFrame) / (1000 / 60), 0), 3)
+    this.#lastFrame = frame
+
     const { useSpring, stiffness, damping, lerpSpeed } = this.config
 
     if (useSpring) {
-      this.#velocityGamma += (this.#targetGamma - this.#currentGamma) * stiffness;
-      this.#velocityBeta  += (this.#targetBeta - this.#currentBeta) * stiffness
-      this.#velocityGamma *= damping
-      this.#velocityBeta  *= damping
-      this.#currentGamma  += this.#velocityGamma
-      this.#currentBeta   += this.#velocityBeta
+      this.#velocityGamma += (this.#targetGamma - this.#currentGamma) * stiffness * dt
+      this.#velocityBeta  += (this.#targetBeta - this.#currentBeta) * stiffness * dt
+      this.#velocityGamma *= damping ** dt
+      this.#velocityBeta  *= damping ** dt
+      this.#currentGamma  += this.#velocityGamma * dt
+      this.#currentBeta   += this.#velocityBeta * dt
     } else {
-      this.#currentGamma += (this.#targetGamma - this.#currentGamma) * lerpSpeed;
-      this.#currentBeta  += (this.#targetBeta - this.#currentBeta) * lerpSpeed
+      const step = 1 - (1 - lerpSpeed) ** dt
+      this.#currentGamma += (this.#targetGamma - this.#currentGamma) * step
+      this.#currentBeta  += (this.#targetBeta - this.#currentBeta) * step
     }
 
     this.#emitValues((this.#currentGamma + 1) * 50, (this.#currentBeta + 1) * 50)
@@ -297,6 +340,7 @@ export default class GyroShine extends EventTarget {
 
   #startAnimationLoop() {
     if (this.animate && !this.#animationFrame) {
+      this.#lastFrame = null
       this.#animationFrame = requestAnimationFrame(this.#animationLoop)
     }
   }
@@ -306,6 +350,7 @@ export default class GyroShine extends EventTarget {
       cancelAnimationFrame(this.#animationFrame)
       this.#animationFrame = null
     }
+    this.#lastFrame = null
   }
 
   // =============================================================
@@ -325,18 +370,22 @@ export default class GyroShine extends EventTarget {
   }
 
   #emitValues(gammaPercent, betaPercent) {
-    const gp = Math.round(gammaPercent * 100)
-    const bp = Math.round(betaPercent * 100)
+    const g = clampPercent(gammaPercent)
+    const b = clampPercent(betaPercent)
+    const gp = Math.round(g * 100)
+    const bp = Math.round(b * 100)
 
     if (gp === this.#prevGP && bp === this.#prevBP) return
 
     this.#prevGP = gp
     this.#prevBP = bp
 
-    this.#detail.gammaPercent = formatPercent(gammaPercent)
-    this.#detail.betaPercent  = formatPercent(betaPercent)
-
-    this.dispatchEvent(new CustomEvent('change', { detail: this.#detail }))
+    this.dispatchEvent(new CustomEvent('change', {
+      detail: {
+        gammaPercent: formatPercent(g),
+        betaPercent: formatPercent(b),
+      },
+    }))
   }
 
   // =============================================================
@@ -355,6 +404,7 @@ export default class GyroShine extends EventTarget {
     )
     if (!tilt) return
     this.#alphaBase = tilt.alphaBase
+    this.#dropPointerFallback()
     this.#setTarget(tilt.gammaNorm, tilt.betaNorm)
   }
 
@@ -417,6 +467,12 @@ export default class GyroShine extends EventTarget {
         this.#emitNeutral()
         return
       }
+      if (this.#needsExplicitMotionPermission()) {
+        this.#detachSources()
+        this.#emitNeutral()
+        this.#armPermissionGesture()
+        return
+      }
       void this.start()
     }
     this.#motionMedia.addEventListener('change', this.#onMotionMediaChange)
@@ -428,6 +484,46 @@ export default class GyroShine extends EventTarget {
     }
     this.#motionMedia = null
     this.#onMotionMediaChange = null
+  }
+
+  #needsExplicitMotionPermission() {
+    return typeof DeviceOrientationEvent !== 'undefined'
+      && typeof DeviceOrientationEvent.requestPermission === 'function'
+  }
+
+  #armPermissionGesture() {
+    if (this.#permissionGestureHandler || !this.#active) return
+    this.dispatchEvent(new CustomEvent('permissionneeded', {
+      detail: { reason: 'gesture' },
+    }))
+    this.#permissionGestureHandler = () => {
+      this.#clearPermissionGesture()
+      if (!this.#active || this.#motionBlocked()) return
+      void this.start()
+    }
+    window.addEventListener('click', this.#permissionGestureHandler, true)
+  }
+
+  #clearPermissionGesture() {
+    if (!this.#permissionGestureHandler) return
+    window.removeEventListener('click', this.#permissionGestureHandler, true)
+    this.#permissionGestureHandler = null
+  }
+
+  #dropPointerFallback() {
+    this.#removeWindowListener('pointermove', this.#pointerHandler)
+    this.#pointerHandler = null
+  }
+
+  #removeWindowListener(type, handler) {
+    if (!handler) return
+    handler.cancel?.()
+    window.removeEventListener(type, handler)
+  }
+
+  #sensorFrequency() {
+    if (!(this.config.refreshRate > 0)) return SENSOR_FREQUENCY
+    return 1000 / this.config.refreshRate
   }
 
   #armRuntime() {
@@ -474,11 +570,23 @@ export default class GyroShine extends EventTarget {
 
     this.#log(`Using Telegram API (${platform})`)
 
-    this.#twaOrientation = TWA.DeviceOrientation
-    this.#twaOrientation.start({
-      refresh_rate: this.config.refreshRate,
-      need_absolute: false,
-    })
+    const orientation = TWA.DeviceOrientation
+    try {
+      orientation.start({
+        refresh_rate: this.config.refreshRate,
+        need_absolute: false,
+      })
+    } catch (err) {
+      this.#warn('Telegram DeviceOrientation start failed:', err?.message)
+      try {
+        orientation.stop()
+      } catch {
+        // Уже остановлен или старт не дошёл до подписки.
+      }
+      return false
+    }
+
+    this.#twaOrientation = orientation
 
     this.#twaHandler = () => {
       const { alpha, gamma, beta } = this.#twaOrientation
@@ -524,34 +632,43 @@ export default class GyroShine extends EventTarget {
     let sensor
     try {
       sensor = new SensorCtor({
-        frequency: SENSOR_FREQUENCY,
+        frequency: this.#sensorFrequency(),
         referenceFrame: 'screen',
       })
       this.#sensor = sensor
 
-      this.#onSensorReading = () => {
+      this.#onSensorReading = this.#throttle(() => {
         if (this.#sensor !== sensor) return
         const tilt = this.#quaternionToTilt(sensor)
         this.#setTarget(tilt.gammaNorm, tilt.betaNorm)
-      }
+      }, this.config.refreshRate)
       sensor.addEventListener('reading', this.#onSensorReading)
 
       const ok = await new Promise(resolve => {
         let settled = false
+        const onReady = () => finish(true)
+        const onError = (event) => {
+          const message = event?.error?.message ?? 'unknown'
+          this.#error('OrientationSensor error:', message)
+          finish(false)
+        }
         const finish = (value) => {
           if (settled) return
           settled = true
           clearTimeout(timer)
+          sensor.removeEventListener('reading', onReady)
+          sensor.removeEventListener('error', onError)
           resolve(value)
         }
         const timer = setTimeout(() => finish(false), SENSOR_START_TIMEOUT)
-        sensor.addEventListener('reading', () => finish(true), { once: true })
-        sensor.addEventListener('error', (event) => {
-          const message = event?.error?.message ?? 'unknown'
-          this.#error('OrientationSensor error:', message)
+        sensor.addEventListener('reading', onReady)
+        sensor.addEventListener('error', onError)
+        try {
+          sensor.start()
+        } catch (err) {
+          this.#warn('RelativeOrientationSensor start failed:', err?.message)
           finish(false)
-        }, { once: true })
-        sensor.start()
+        }
       })
 
       if (!ok || this.#sensor !== sensor) {
@@ -572,6 +689,7 @@ export default class GyroShine extends EventTarget {
 
   #releaseSensor(sensor) {
     if (!sensor) return
+    this.#onSensorReading?.cancel?.()
     if (this.#onSensorReading) sensor.removeEventListener('reading', this.#onSensorReading)
     try {
       sensor.stop()
@@ -722,8 +840,9 @@ export default class GyroShine extends EventTarget {
   // ПРОВЕРКА БАТАРЕИ
   // =============================================================
 
-  async #checkBattery() {
+  async #checkBattery(gen = this.#generation) {
     const level = await this.#readBatteryLevel()
+    if (gen !== this.#generation || !this.#active) return false
     if (this.#batteryTooLow(level)) return false
     return true
   }
@@ -731,8 +850,9 @@ export default class GyroShine extends EventTarget {
   #startBatteryCheck() {
     if (this.config.minBattery <= 0) return
     this.#stopBatteryCheck()
+    const gen = this.#generation
     this.#batteryCheckInterval = setInterval(() => {
-      void this.#checkBattery()
+      void this.#checkBattery(gen)
     }, BATTERY_CHECK_INTERVAL)
   }
 
@@ -822,6 +942,7 @@ export default class GyroShine extends EventTarget {
   }
 
   #detachSources() {
+    this.#clearPermissionGesture()
     this.#stopBatteryCheck()
     this.#stopAnimationLoop()
 
@@ -842,18 +963,15 @@ export default class GyroShine extends EventTarget {
       this.#onSensorReading = null
     }
 
-    if (this.#deviceOrientationHandler) {
-      window.removeEventListener('deviceorientation', this.#deviceOrientationHandler)
-      this.#deviceOrientationHandler = null
-    }
-
-    if (this.#pointerHandler) {
-      window.removeEventListener('pointermove', this.#pointerHandler)
-      this.#pointerHandler = null
-    }
+    this.#removeWindowListener('deviceorientation', this.#deviceOrientationHandler)
+    this.#deviceOrientationHandler = null
+    this.#removeWindowListener('pointermove', this.#pointerHandler)
+    this.#pointerHandler = null
 
     this.#alphaBase = null
     this.#azimuthBase = null
+    this.#prevGP = -1
+    this.#prevBP = -1
   }
 
   /** @param {string} eventName @param {Function} callback */
